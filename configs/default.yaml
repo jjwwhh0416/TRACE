@@ -5,6 +5,9 @@ notes: "Pre-training run"
 # Encoder parameters
 task_name: "pretraining" 
 
+# Encoder type
+encoder_type: "patchTST"
+
 # Model parameters
 model_name: "TraceEncoder"
 seq_len_channel: 180

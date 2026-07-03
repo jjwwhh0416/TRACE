@@ -13,11 +13,20 @@ from src.models.layers.revin import RevIN
 from src.models.layers.prediction_head import ClassificationHead, ForecastingHead, ReconstructionHead, EmbeddingHead, RetrievalAugmentedHead
 from src.models.layers.get_encoder import get_transformer_backbone
 
+from chronos import ChronosPipline
+
 class TS_Encoder(nn.Module):
     def __init__(self, configs: Namespace | dict, **kwargs: dict):
         super().__init__()
         configs = self._update_inputs(configs, **kwargs)
         self.configs = configs
+        #encoder type
+        self.encoder_type = configs.getattr("encoder_type", "patchTST")
+
+        #piplines
+        self.chronos_1_pipline = None
+        self.chronos_2_pipline = None
+
         self.task_name = configs.task_name
         self.n_channels = configs.n_channels  # number of channels
         self.output_attention = configs.output_attention
@@ -167,26 +176,75 @@ class TS_Encoder(nn.Module):
             [B, total_len, d_model] for TraceEncoder, [B, C, N, d_model] for other encoders
         """
         B, C, L = x_enc.shape
-        # Normalization
-        x_enc = self.normalizer(x=x_enc, mask=pretrain_mask * input_mask, mode="norm")
-        x_enc = torch.nan_to_num(x_enc, nan=0, posinf=0, neginf=0)
-        # Some time-series are too short, so masking them out results in NaNs.
 
+        if (self.encoder_type == "patchTST"):
+            # Normalization
+            x_enc = self.normalizer(x=x_enc, mask=pretrain_mask * input_mask, mode="norm")
+            x_enc = torch.nan_to_num(x_enc, nan=0, posinf=0, neginf=0)
+            # Some time-series are too short, so masking them out results in NaNs.
 
-        # Patching and embedding
-        enc_in = self.patch_embedding(x_enc, mask=pretrain_mask)
-        # [B, total_len, d_model] or [B, C, N, d_model]
+            # Patching and embedding
+            enc_in = self.patch_embedding(x_enc, mask=pretrain_mask)
+            # [B, total_len, d_model] or [B, C, N, d_model]
 
-        # Encoder
-        attention_mask = Masking.convert_seq_to_patch_view(input_mask, self.patch_len)  #[B, C, N]
-        enc_out, attns = self.encoder(
-            x=enc_in,
-            attn_mask=attention_mask,
-            **{
-                "n_vars": self.n_channels,
-                "n_tokens": self.num_patches,
-            }
-        )
+            # Encoder
+            attention_mask = Masking.convert_seq_to_patch_view(input_mask, self.patch_len)  #[B, C, N]
+            enc_out, attns = self.encoder(
+                x=enc_in,
+                attn_mask=attention_mask,
+                **{
+                    "n_vars": self.n_channels,
+                    "n_tokens": self.num_patches,
+                }
+            )
+        elif (self.encoder_type == "Chronos1"):
+            #Chronos-t5-base
+            if (self.chronos_1_pipline == None):
+                from chronos import ChronosPipeline
+
+                #device 확인
+                current_device = x_enc.device
+
+                self.chronos_1_pipline = ChronosPipeline.from_pretrained(
+                    "amazon/chronos-t5-base",
+                    device_map = current_device,
+                    torch_dtype = torch.bfloat16
+                )
+
+                for param in self.chronos_1_pipline.model.parameters():
+                    param.requires_grad = False
+            
+            #Chronos 1은 [B, L] 만 받을 수 있으므로 [B, C, L]을 [B * C, L]로 풀어준다
+            x_reshaped = x_enc.view(B * C, L)
+
+            #학습할 필요 없으므로 grad 계산x
+            with torch.no_grad():
+                enc_out_reshaped, _ = self.chronos_1_pipline.embed(x_reshaped)
+
+            enc_out = enc_out_reshaped.view(B, C, -1, enc_out_reshaped.size(-1))
+
+            enc_out = enc_out.to(torch.float32)
+            attns = None
+
+        elif (self.encoder_type == "Chronos2"):
+            #Chronos-2
+            if (self.chronos_2_pipline == None):
+                from chronos import Chronos2Pipeline
+
+                current_device = x_enc.device
+
+                self.chronos_2_pipline = Chronos2Pipeline.from_pretrained(
+                    "amazon/chronos-2",
+                    device_map = current_device,
+                    torch_dtype = torch.bfloat16
+                )
+
+                for param in self.chronos_2_pipline.model.parameters():
+                    param.requires_grad = False
+                
+                
+        
+        
         return enc_out, attns
     
     

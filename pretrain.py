@@ -27,6 +27,7 @@ def main_worker():
     parser.add_argument("--val_batch_size", type=int, default=None)
     parser.add_argument("--max_epochs", type=int, default=None)
     parser.add_argument("--pos_embed_type", type=str, default=None)
+    parser.add_argument("--encoder_type", type=str, default="patchTST")
     args_cmd = parser.parse_args()
 
     config = Config(
@@ -49,6 +50,7 @@ def main_worker():
     config["val_batch_size"] = args_cmd.val_batch_size
     config["pos_embed_type"] = args_cmd.pos_embed_type
     config["max_epochs"] = args_cmd.max_epochs
+    config["encoder_type"] = args_cmd.encoder_type
     make_dir_if_not_exists(config["checkpoint_path"])
 
     args = parse_config(config)
