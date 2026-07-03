@@ -13,8 +13,6 @@ from src.models.layers.revin import RevIN
 from src.models.layers.prediction_head import ClassificationHead, ForecastingHead, ReconstructionHead, EmbeddingHead, RetrievalAugmentedHead
 from src.models.layers.get_encoder import get_transformer_backbone
 
-from chronos import ChronosPipline
-
 class TS_Encoder(nn.Module):
     def __init__(self, configs: Namespace | dict, **kwargs: dict):
         super().__init__()
@@ -197,6 +195,7 @@ class TS_Encoder(nn.Module):
                     "n_tokens": self.num_patches,
                 }
             )
+            print(enc_out.shape)
         elif (self.encoder_type == "Chronos1"):
             #Chronos-t5-base
             if (self.chronos_1_pipline == None):

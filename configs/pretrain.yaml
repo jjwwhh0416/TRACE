@@ -2,6 +2,10 @@
 random_seed: 13
 notes: "Pre-training run"
 
+encoder_type: "patchTST"
+
+checkpoint_path: "./checkpoints/"
+
 # Encoder parameters
 task_name: "pretraining" 
 
@@ -34,10 +38,10 @@ checkpoint_interval: 1
 debug: False
 
 # Training parameters
-train_batch_size : 256 # 1024 2048 3072 4096
-val_batch_size: 256 # 1024 2048 3072 4096 
+train_batch_size : 2 # 1024 2048 3072 4096
+val_batch_size: 2 # 1024 2048 3072 4096 
 mask_ratio: 0.3
-max_epoch: 200
+max_epoch: 1
 optimizer_name : "AdamW"
 enable_gradient_checkpointing: True
 max_norm: 5
@@ -67,6 +71,6 @@ downsampling_type : "interpolate"
 pad_mode : "constant"
 pad_constant_values : 0
 shuffle : True
-num_workers : 5
+num_workers : 0
 pin_memory : True
 drop_last : False

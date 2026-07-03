@@ -106,7 +106,7 @@ class Pretraining(Tasks):
     def train(self):
         if self.args.rank == 0:
             self.run_name = self.logger.name
-            path = os.path.join(self.args.checkpoint_path, self.run_name)
+            path = os.path.join("./checkpoints/", self.run_name)
             make_dir_if_not_exists(path, verbose=True)
 
         self.optimizer = self._select_optimizer()

@@ -15,7 +15,7 @@ def main_worker():
     world_size = int(os.environ["WORLD_SIZE"])
 
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl")
+    dist.init_process_group(backend="gloo")
 
     # --------- Load Config ----------
     parser = argparse.ArgumentParser()
@@ -51,7 +51,7 @@ def main_worker():
     config["pos_embed_type"] = args_cmd.pos_embed_type
     config["max_epochs"] = args_cmd.max_epochs
     config["encoder_type"] = args_cmd.encoder_type
-    make_dir_if_not_exists(config["checkpoint_path"])
+    make_dir_if_not_exists("./checkpoints/")
 
     args = parse_config(config)
 
