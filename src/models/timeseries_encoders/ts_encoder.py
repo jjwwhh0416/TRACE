@@ -197,6 +197,7 @@ class TS_Encoder(nn.Module):
             )
             print(enc_out.shape)
         elif (self.encoder_type == "Chronos1"):
+            print("chronos activated")
             #Chronos-t5-base
             if (self.chronos_1_pipline == None):
                 from chronos import ChronosPipeline
@@ -224,6 +225,7 @@ class TS_Encoder(nn.Module):
 
             enc_out = enc_out.to(torch.float32)
             attns = None
+            print("chronos done")
 
         elif (self.encoder_type == "Chronos2"):
             #Chronos-2

@@ -20,7 +20,7 @@ dropout: 0.1
 n_heads: 6
 e_layers: 6
 attention_dropout: 0.1
-torch_dtype: "bfloat16"
+torch_dtype: "float32"
 value_embedding_bias: False # Whether to add biases to the value embeddings
 orth_gain: 1.41
 pos_embed_type: "rel_pos" # "rope" or "rel_pos" add positional embedding to the input
@@ -52,7 +52,7 @@ min_lr: 0.00001 # 1e-5
 lr_decay_rate: 0.9
 warmup_lr: 0.00001 # 1e-5
 warmup_steps: 1000
-use_amp: True
+use_amp: False
 beta: 1
 distributed: True
 early_stop: False

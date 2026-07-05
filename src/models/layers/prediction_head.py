@@ -36,6 +36,41 @@ class ReconstructionHead(nn.Module):
         )  # [B, C, N, patch_len]
         x = x.flatten(start_dim=2, end_dim=3)  # [B, C, N * patch_len] => [B, C, L]
         return x
+    
+class GlobalReconstructionHead(nn.Module):
+    def __init__(self, n_channels, d_model, patch_len, dropout=0.1):
+        super().__init__()
+        self.n_channels = n_channels
+        self.patch_len = patch_len
+        
+        self.head = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(d_model, patch_len * n_channels)
+        )
+
+    def forward(self, x, shape="else", **kwargs):
+        B, N, D = x.shape
+        
+        x = self.head(x)
+        
+        x = x.view(B, N, self.patch_len, self.n_channels)
+        
+        x = x.permute(0, 3, 1, 2).contiguous()
+        x = x.view(B, self.n_channels, -1)
+        return x
+
+class GlobalClassificationHead(nn.Module):
+    def __init__(self, d_model, num_class, dropout=0.1):
+        super().__init__()
+        self.head = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(d_model, num_class)
+        )
+
+    def forward(self, x, mask=None, shape="else", **kwargs):
+        x = x.mean(dim=1) 
+        
+        return self.head(x)
 
 
 class EmbeddingHead(nn.Module):
