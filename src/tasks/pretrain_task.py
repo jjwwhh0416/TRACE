@@ -201,6 +201,7 @@ class Pretraining(Tasks):
                             "learning_rate": self.optimizer.param_groups[0]["lr"],
                     }
                 )
+                    print(f"Epoch: {cur_epoch} | Total: {total_loss.item():.4f} | Recon: {recon_loss.item():.4f} | Class: {classification_loss.item():.4f}")
 
                 if self.args.debug and opt_steps >= 1:
                     self.debug_model_outputs(total_loss, outputs, batch_x)
