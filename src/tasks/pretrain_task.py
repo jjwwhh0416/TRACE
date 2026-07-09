@@ -68,15 +68,6 @@ class Pretraining(Tasks):
                 forecast_loss = masked_loss.nansum() / (observed_mask.nansum() + 1e-7)
                 preds = outputs.classification.argmax(dim=1)
 
-                # ===== DEBUG =====
-                print("split:", split)
-                print("classification output shape:", outputs.classification.shape)
-                print("unique labels:", torch.unique(labels))
-                print("min label:", labels.min().item())
-                print("max label:", labels.max().item())
-                print("num_classes:", outputs.classification.shape[1])
-                # =================
-
                 # Support -100 padding
                 valid_mask = labels != -100
                 all_preds.append(preds[valid_mask])

@@ -264,7 +264,7 @@ class Tasks(nn.Module):
             config=self.args,
             name=self.args.run_name if hasattr(self.args, "run_name") else None,
             notes=self.args.notes if notes is None else notes,
-            mode="disabled",
+            mode="online",
         )
         if self.args.debug:
             print(f"Run name: {self.logger.name}\n")
