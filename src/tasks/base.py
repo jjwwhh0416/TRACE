@@ -260,6 +260,7 @@ class Tasks(nn.Module):
     def setup_logger(self, notes: str = None):
         self.logger = wandb.init(
             project="Timeseries Multimodal Foundation Model",
+            entity="jjwwhh0416"
             dir=PATHS.WANDB_DIR,
             config=self.args,
             name=self.args.run_name if hasattr(self.args, "run_name") else None,
