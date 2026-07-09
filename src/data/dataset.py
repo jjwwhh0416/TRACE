@@ -111,11 +111,13 @@ class PretrainingDataset(TaskDataset):
     def __getitem__(self, index):
         assert index < self.__len__()
 
-        timeseries = self.data[index] # [C, L]
+        timeseries = self.data[index]      # [C, L]
+        forecast = self.forecast_data[index]   # [C, H]
+        assert forecast.shape[-1] == self.forecast_len
+
         timeseries_len = timeseries.shape[1]
-        labels = self.labels[index,].astype(int)
-        
-        ## padding to the same length
+
+        ## padding / downsampling
         if timeseries_len <= self.seq_len_channel:
             timeseries, input_mask = upsample_timeseries(
                 timeseries,
@@ -124,14 +126,26 @@ class PretrainingDataset(TaskDataset):
                 sampling_type=self.upsampling_type,
                 mode=self.pad_mode,
             )
+        else:
+            downsampled = []
+            masks = []
 
-        meta_data = self.meta_data[index] if self.return_meta_data else None
-        
+            for c in range(timeseries.shape[0]):
+                ts, mask = downsample_timeseries(
+                    timeseries[c],
+                    self.seq_len_channel,
+                    sampling_type=self.downsampling_type,
+                )
+                downsampled.append(ts)
+                masks.append(mask)
+
+            timeseries = np.stack(downsampled, axis=0)
+            input_mask = np.stack(masks, axis=0)
+
         return TimeseriesData(
-            timeseries=timeseries,  # [C, L]
-            labels=labels,
-            input_mask=input_mask,  # [C,L]
-            metadata=meta_data
+            timeseries=timeseries,      # [C, seq_len_channel]
+            forecast=forecast,          # [C, H]
+            input_mask=input_mask,      # [C, seq_len_channel]
         )
 
     def __len__(self):
