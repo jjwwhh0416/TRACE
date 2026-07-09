@@ -22,7 +22,7 @@ class PretrainingDataset(TaskDataset):
     def __init__(
         self,
         seq_len_channel: int = 180,
-        root_path: str = "./dataset/" + "pretrain/",
+        root_path: str = os.environ.get("TTRAG_DATA_DIR", "./dataset/" + "pretraining/"),
         data_split: str = "train",
         scale: bool = True,
         task_name: str = TASKS.PRETRAINING,
