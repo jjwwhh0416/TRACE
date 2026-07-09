@@ -293,7 +293,6 @@ class TS_Encoder(nn.Module):
                     "n_tokens": self.num_patches,
                 }
             )
-            print(enc_out.shape)
 
         elif (self.encoder_type == "Chronos1"):
             print("chronos activated")
