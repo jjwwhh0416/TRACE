@@ -61,7 +61,7 @@ delta: 0.0001
 
 # Dataset parameters
 n_channels: 6
-num_class: 11
+num_class: 13
 scale : True
 upsampling_pad_direction : "backward"
 upsampling_type : "pad"
