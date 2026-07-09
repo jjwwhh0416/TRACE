@@ -27,7 +27,7 @@ def main_worker():
     parser.add_argument("--val_batch_size", type=int, default=None)
     parser.add_argument("--max_epochs", type=int, default=None)
     parser.add_argument("--pos_embed_type", type=str, default=None)
-    parser.add_argument("--encoder_type", type=str, default="patchTST")
+    parser.add_argument("--encoder_type", type=str, default=None)
     args_cmd = parser.parse_args()
 
     config = Config(
@@ -43,14 +43,22 @@ def main_worker():
     config["distributed"] = True
     config["checkpoint_path"] = PATHS.CHECKPOINTS_DIR
     ### Override config with command line arguments
-    config["patch_len"] = args_cmd.patch_len
-    config["patch_stride_len"] = args_cmd.patch_stride_len
-    config["seq_len_channel"] = args_cmd.seq_len_channel
-    config["train_batch_size"] = args_cmd.train_batch_size
-    config["val_batch_size"] = args_cmd.val_batch_size
-    config["pos_embed_type"] = args_cmd.pos_embed_type
-    config["max_epochs"] = args_cmd.max_epochs
-    config["encoder_type"] = args_cmd.encoder_type
+    if args_cmd.patch_len is not None:
+        config["patch_len"] = args_cmd.patch_len
+    if args_cmd.patch_stride_len is not None:
+        config["patch_stride_len"] = args_cmd.patch_stride_len
+    if args_cmd.seq_len_channel is not None:
+        config["seq_len_channel"] = args_cmd.seq_len_channel
+    if args_cmd.train_batch_size is not None:
+        config["train_batch_size"] = args_cmd.train_batch_size
+    if args_cmd.val_batch_size is not None:
+        config["val_batch_size"] = args_cmd.val_batch_size
+    if args_cmd.pos_embed_type is not None:
+        config["pos_embed_type"] = args_cmd.pos_embed_type
+    if args_cmd.max_epochs is not None:
+        config["max_epochs"] = args_cmd.max_epochs
+    if args_cmd.encoder_type is not None:
+        config["encoder_type"] = args_cmd.encoder_type
     make_dir_if_not_exists("./checkpoints/")
 
     args = parse_config(config)
