@@ -146,10 +146,16 @@ class Pretraining(Tasks):
             if self.args.distributed and isinstance(self.train_dataloader.sampler, DistributedSampler):
                 self.train_dataloader.sampler.set_epoch(cur_epoch)
                 
-            for batch_x in tqdm(
-                self.train_dataloader, total=len(self.train_dataloader)
-            ):
-                self.optimizer.zero_grad(set_to_none=True)
+            # 💡 기존 로직에서 enumerate를 추가하여 인덱스(i)를 추적합니다.
+            for i, batch_x in enumerate(tqdm(self.train_dataloader, total=len(self.train_dataloader))):
+                
+                # 💡 [분기 1] 기울기 초기화
+                if self.args.encoder_type == "MOIRAI":
+                    if i == 0:
+                        self.optimizer.zero_grad(set_to_none=True) # 루프 시작 시 한 번만 초기화
+                else:
+                    self.optimizer.zero_grad(set_to_none=True) # 기존: 매 배치마다 초기화
+
                 timeseries = batch_x.timeseries.float().to(self.device)  #[B, C, L]
                 input_mask = batch_x.input_mask.long().to(self.device)  #[B, C, L]
                 labels = torch.tensor(batch_x.labels, dtype=torch.long).reshape(-1).to(self.device)
@@ -189,7 +195,6 @@ class Pretraining(Tasks):
                     classification_loss = self.classification_criterion(
                         outputs.classification, labels
                     )
-                    print("classification_loss:", classification_loss.item())
                 else:
                     classification_loss = 0.0 * outputs.classification.sum()
                 
@@ -202,21 +207,41 @@ class Pretraining(Tasks):
                             "train_recon_loss": recon_loss.item(),
                             "train_classification_loss": classification_loss.item(),
                             "learning_rate": self.optimizer.param_groups[0]["lr"],
-                    }
-                )
-                    print(f"Epoch: {cur_epoch} | Total: {total_loss.item():.4f} | Recon: {recon_loss.item():.4f} | Class: {classification_loss.item():.4f}")
+                        }
+                    )
+                    # print(f"Epoch: {cur_epoch} | Total: {total_loss.item():.4f} | Recon: {recon_loss.item():.4f} | Class: {classification_loss.item():.4f}")
 
                 if self.args.debug and opt_steps >= 1:
                     self.debug_model_outputs(total_loss, outputs, batch_x)
 
-                self.scaler.scale(total_loss).backward()
-                self.scaler.unscale_(self.optimizer)
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_norm)
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                opt_steps = opt_steps + 1
-
-                self.lr_scheduler.step(cur_epoch=cur_epoch, cur_step=opt_steps)
+                # 💡 [분기 2] 역전파 및 가중치 업데이트 블록
+                if self.args.encoder_type == "MOIRAI":
+                    # [나중에 삭제할 블록] MOIRAI 전용 누적 업데이트
+                    accumulation_steps = 4
+                    scaled_loss = total_loss / accumulation_steps
+                    
+                    self.scaler.scale(scaled_loss).backward()
+                    
+                    if (i + 1) % accumulation_steps == 0 or (i + 1) == len(self.train_dataloader):
+                        self.scaler.unscale_(self.optimizer)
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_norm)
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                        
+                        self.optimizer.zero_grad(set_to_none=True)
+                        
+                        opt_steps = opt_steps + 1
+                        self.lr_scheduler.step(cur_epoch=cur_epoch, cur_step=opt_steps)
+                else:
+                    # [기존 블록] 기존 인코더들을 위한 매 스텝 업데이트
+                    self.scaler.scale(total_loss).backward()
+                    self.scaler.unscale_(self.optimizer)
+                    nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_norm)
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                    
+                    opt_steps = opt_steps + 1
+                    self.lr_scheduler.step(cur_epoch=cur_epoch, cur_step=opt_steps)
 
             if cur_epoch % self.args.log_interval == 0:
                 if self.args.distributed and isinstance(self.val_dataloader.sampler, DistributedSampler):
