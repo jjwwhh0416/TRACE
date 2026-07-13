@@ -146,17 +146,14 @@ class Pretraining(Tasks):
             if self.args.distributed and isinstance(self.train_dataloader.sampler, DistributedSampler):
                 self.train_dataloader.sampler.set_epoch(cur_epoch)
                 
-            # 💡 기존 로직에서 enumerate를 추가하여 인덱스(i)를 추적합니다.
-            for i, batch_x in enumerate(tqdm(self.train_dataloader, total=len(self.train_dataloader))):
-                
-                # 💡 [분기 1] 기울기 초기화
-                if self.args.encoder_type == "MOIRAI":
-                    if i == 0:
-                        self.optimizer.zero_grad(set_to_none=True) # 루프 시작 시 한 번만 초기화
-                else:
-                    self.optimizer.zero_grad(set_to_none=True) # 기존: 매 배치마다 초기화
+            accumulation_steps = 4  # 64(배치) x 4(누적) = 256 효과
+            self.optimizer.zero_grad(set_to_none=True) # 루프 시작 전 초기화
 
-                timeseries = batch_x.timeseries.float().to(self.device)  #[B, C, L]
+            for i, batch_x in enumerate(tqdm(
+                self.train_dataloader, total=len(self.train_dataloader)
+            )):
+                # self.optimizer.zero_grad(set_to_none=True) <- 기존의 이 줄은 삭제합니다!
+                timeseries = batch_x.timeseries.float().to(self.device)
                 input_mask = batch_x.input_mask.long().to(self.device)  #[B, C, L]
                 labels = torch.tensor(batch_x.labels, dtype=torch.long).reshape(-1).to(self.device)
                 if not self.args.set_input_mask:
@@ -169,36 +166,37 @@ class Pretraining(Tasks):
                 ):
                     outputs = self.model(x_enc=timeseries, input_mask=input_mask)
 
-                if (self.args.encoder_type == "MOMENT"):
-                    recon = outputs.reconstruction
-                    B, C, L = timeseries.shape
+                    if (self.args.encoder_type == "MOMENT"):
+                        recon = outputs.reconstruction
+                        B, C, L = timeseries.shape
 
-                    if recon.shape != timeseries.shape:
-                        if recon.dim() == 3 and recon.shape[1] == recon.shape[2]:
-                            recon = torch.mean(recon, dim=1, keepdim=True).repeat(1, C, 1)
-                        
-                        elif recon.shape[1] == L and recon.shape[2] == C:
-                            recon = recon.transpose(1, 2)
-                        
                         if recon.shape != timeseries.shape:
-                            recon = recon.view(B, C, L)
+                            if recon.dim() == 3 and recon.shape[1] == recon.shape[2]:
+                                recon = torch.mean(recon, dim=1, keepdim=True).repeat(1, C, 1)
+                            
+                            elif recon.shape[1] == L and recon.shape[2] == C:
+                                recon = recon.transpose(1, 2)
+                            
+                            if recon.shape != timeseries.shape:
+                                recon = recon.view(B, C, L)
 
-                    recon_loss = self.forecast_criterion(recon, timeseries)  #[B, C, L]
-                else:
-                    recon_loss = self.forecast_criterion(outputs.reconstruction, timeseries)  #[B, C, L]
-                
-                observed_mask = input_mask * (1 - outputs.pretrain_mask)  #[B, C, L]
-                masked_loss = observed_mask * recon_loss  #[B, C, L]
-                recon_loss = masked_loss.nansum() / (observed_mask.nansum() + 1e-7)  #[B, C, L]
-                labeled_mask = (labels != -100)
-                if labeled_mask.any():
-                    classification_loss = self.classification_criterion(
-                        outputs.classification, labels
-                    )
-                else:
-                    classification_loss = 0.0 * outputs.classification.sum()
-                
-                total_loss = recon_loss + self.args.beta * classification_loss
+                        recon_loss = self.forecast_criterion(recon, timeseries)  #[B, C, L]
+                    else:
+                        recon_loss = self.forecast_criterion(outputs.reconstruction, timeseries)  #[B, C, L]
+                    
+                    observed_mask = input_mask * (1 - outputs.pretrain_mask)  #[B, C, L]
+                    masked_loss = observed_mask * recon_loss  #[B, C, L]
+                    recon_loss = masked_loss.nansum() / (observed_mask.nansum() + 1e-7)  #[B, C, L]
+                    labeled_mask = (labels != -100)
+                    if labeled_mask.any():
+                        classification_loss = self.classification_criterion(
+                            outputs.classification, labels
+                        )
+                        print("classification_loss:", classification_loss.item())
+                    else:
+                        classification_loss = 0.0 * outputs.classification.sum()
+                    
+                    total_loss = recon_loss + self.args.beta * classification_loss
                 
                 if self.args.rank == 0:
                     self.logger.log(
@@ -207,38 +205,22 @@ class Pretraining(Tasks):
                             "train_recon_loss": recon_loss.item(),
                             "train_classification_loss": classification_loss.item(),
                             "learning_rate": self.optimizer.param_groups[0]["lr"],
-                        }
-                    )
-                    # print(f"Epoch: {cur_epoch} | Total: {total_loss.item():.4f} | Recon: {recon_loss.item():.4f} | Class: {classification_loss.item():.4f}")
+                    }
+                )
+                    print(f"Epoch: {cur_epoch} | Total: {total_loss.item():.4f} | Recon: {recon_loss.item():.4f} | Class: {classification_loss.item():.4f}")
 
                 if self.args.debug and opt_steps >= 1:
                     self.debug_model_outputs(total_loss, outputs, batch_x)
 
-                # 💡 [분기 2] 역전파 및 가중치 업데이트 블록
-                if self.args.encoder_type == "MOIRAI":
-                    # [나중에 삭제할 블록] MOIRAI 전용 누적 업데이트
-                    accumulation_steps = 4
-                    scaled_loss = total_loss / accumulation_steps
-                    
-                    self.scaler.scale(scaled_loss).backward()
-                    
-                    if (i + 1) % accumulation_steps == 0 or (i + 1) == len(self.train_dataloader):
-                        self.scaler.unscale_(self.optimizer)
-                        nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_norm)
-                        self.scaler.step(self.optimizer)
-                        self.scaler.update()
-                        
-                        self.optimizer.zero_grad(set_to_none=True)
-                        
-                        opt_steps = opt_steps + 1
-                        self.lr_scheduler.step(cur_epoch=cur_epoch, cur_step=opt_steps)
-                else:
-                    # [기존 블록] 기존 인코더들을 위한 매 스텝 업데이트
-                    self.scaler.scale(total_loss).backward()
-                    self.scaler.unscale_(self.optimizer)
+                # 1. 4번 누적할 것이므로 Loss를 4로 나누어 평균을 유지합니다.
+                loss = total_loss / accumulation_steps
+                loss.backward()
+
+                # 2. 4번째 스텝이거나, 데이터로더의 마지막 배치일 때만 업데이트를 진행합니다.
+                if (i + 1) % accumulation_steps == 0 or (i + 1) == len(self.train_dataloader):
                     nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_norm)
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
+                    self.optimizer.step()
+                    self.optimizer.zero_grad(set_to_none=True) # 업데이트 후 기울기 초기화
                     
                     opt_steps = opt_steps + 1
                     self.lr_scheduler.step(cur_epoch=cur_epoch, cur_step=opt_steps)
@@ -280,4 +262,3 @@ class Pretraining(Tasks):
             self.logger.log(eval_metrics.val_loss)
             self.logger.log(eval_metrics.test_loss)
         return eval_metrics
-
