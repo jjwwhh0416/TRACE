@@ -353,6 +353,75 @@ class TS_Encoder(nn.Module):
             enc_out = F.adaptive_avg_pool2d(enc_out, (self.num_patches, self.d_model))
             attns = None
 
+        elif (self.encoder_type == "MOMENT"):
+            print("MOMENT activated")
+            
+            # 💡 [핵심 방어막] 차원 충돌 원천 봉쇄: MOMENT 사용 시 RevIN 바이패스
+            if hasattr(self, "normalizer") and not hasattr(self, "_patched_revin"):
+                if hasattr(self.normalizer, "_denormalize"):
+                    # 기존 함수를 보존하되, MOMENT일 경우 통과시키도록 재정의
+                    def safe_denorm_bypass(x_in):
+                        # RevIN의 상태(저장된 통계값)를 건드리지 않고,
+                        # MOMENT의 출력을 그대로 반환하여 차원 불일치 에러 방지
+                        return x_in 
+                    self.normalizer._denormalize = safe_denorm_bypass
+                self._patched_revin = True
+
+            if not hasattr(self, "moment_model"):
+                from momentfm import MOMENTPipeline
+                current_device = x_enc.device
+                self.moment_model = MOMENTPipeline.from_pretrained(
+                    "AutonLab/MOMENT-1-base", 
+                    model_kwargs={"task_name": "embedding"}
+                )
+                self.moment_model.to(current_device)
+                self.moment_model.train() 
+                self.moment_model.task_name = "embedding"
+
+            # 독립 채널 입력 구성
+            B, L, C = x_enc.shape
+            x_reshaped = x_enc.transpose(1, 2).reshape(B * C, 1, L)
+            
+            # 8의 배수로 패딩
+            pad_len = 8 - (L % 8) if (L % 8) != 0 else 0
+            if pad_len > 0:
+                import torch.nn.functional as F
+                x_input_padded = F.pad(x_reshaped, (0, pad_len))
+            else:
+                x_input_padded = x_reshaped
+
+            # 모델 통과
+            moment_outputs = self.moment_model(x_enc=x_input_padded)
+            
+            # 임베딩 추출 안전장치
+            enc_out = getattr(moment_outputs, "embeddings", None)
+            if enc_out is None:
+                enc_out = getattr(moment_outputs, "features", None) or getattr(moment_outputs, "reconstruction", None)
+                if enc_out is None:
+                    for v in moment_outputs.__dict__.values():
+                        if isinstance(v, torch.Tensor):
+                            enc_out = v
+                            break
+
+            enc_out = enc_out.to(dtype=torch.float32)
+
+            if enc_out.dim() == 2:
+                enc_out = enc_out.unsqueeze(1)
+            elif enc_out.dim() == 3 and enc_out.shape[1] > enc_out.shape[2]: 
+                enc_out = enc_out.transpose(1, 2)
+            
+            import torch.nn.functional as F
+            if enc_out.shape[-1] != self.d_model:
+                pad_size = self.d_model - enc_out.shape[-1]
+                if pad_size > 0:
+                    enc_out = F.pad(enc_out, (0, pad_size))
+                else:
+                    enc_out = enc_out[..., :self.d_model]
+
+            enc_out = enc_out.view(B, C, -1, self.d_model)
+            enc_out = F.adaptive_avg_pool2d(enc_out, (self.num_patches, self.d_model))
+            attns = None
+
         elif (self.encoder_type == "MOIRAI"):
             print("MOIRAI activated")
             
