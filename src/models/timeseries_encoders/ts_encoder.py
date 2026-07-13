@@ -374,7 +374,7 @@ class TS_Encoder(nn.Module):
                     "AutonLab/MOMENT-1-base", 
                     model_kwargs={"task_name": "embedding"}
                 )
-                self.moment_model.to(current_device)
+                self.moment_model.to(device=current_device, dtype=torch.float32)
                 self.moment_model.train() 
                 self.moment_model.task_name = "embedding"
 
