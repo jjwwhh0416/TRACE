@@ -146,11 +146,14 @@ class Pretraining(Tasks):
             if self.args.distributed and isinstance(self.train_dataloader.sampler, DistributedSampler):
                 self.train_dataloader.sampler.set_epoch(cur_epoch)
                 
-            for batch_x in tqdm(
+            accumulation_steps = 4  # 64(배치) x 4(누적) = 256 효과
+            self.optimizer.zero_grad(set_to_none=True) # 루프 시작 전 초기화
+
+            for i, batch_x in enumerate(tqdm(
                 self.train_dataloader, total=len(self.train_dataloader)
-            ):
-                self.optimizer.zero_grad(set_to_none=True)
-                timeseries = batch_x.timeseries.float().to(self.device)  #[B, C, L]
+            )):
+                # self.optimizer.zero_grad(set_to_none=True) <- 기존의 이 줄은 삭제합니다!
+                timeseries = batch_x.timeseries.float().to(self.device)
                 input_mask = batch_x.input_mask.long().to(self.device)  #[B, C, L]
                 labels = torch.tensor(batch_x.labels, dtype=torch.long).reshape(-1).to(self.device)
                 if not self.args.set_input_mask:
@@ -209,14 +212,18 @@ class Pretraining(Tasks):
                 if self.args.debug and opt_steps >= 1:
                     self.debug_model_outputs(total_loss, outputs, batch_x)
 
-                self.scaler.scale(total_loss).backward()
-                self.scaler.unscale_(self.optimizer)
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_norm)
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                opt_steps = opt_steps + 1
+                # 1. 4번 누적할 것이므로 Loss를 4로 나누어 평균을 유지합니다.
+                loss = total_loss / accumulation_steps
+                loss.backward()
 
-                self.lr_scheduler.step(cur_epoch=cur_epoch, cur_step=opt_steps)
+                # 2. 4번째 스텝이거나, 데이터로더의 마지막 배치일 때만 업데이트를 진행합니다.
+                if (i + 1) % accumulation_steps == 0 or (i + 1) == len(self.train_dataloader):
+                    nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_norm)
+                    self.optimizer.step()
+                    self.optimizer.zero_grad(set_to_none=True) # 업데이트 후 기울기 초기화
+                    
+                    opt_steps = opt_steps + 1
+                    self.lr_scheduler.step(cur_epoch=cur_epoch, cur_step=opt_steps)
 
             if cur_epoch % self.args.log_interval == 0:
                 if self.args.distributed and isinstance(self.val_dataloader.sampler, DistributedSampler):
